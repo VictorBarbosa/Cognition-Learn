@@ -77,7 +77,7 @@ setup(
     python_requires=">=3.10.1,<=3.10.12",
     entry_points={
         "console_scripts": [
-            "mlagents-learn=mlagents.trainers.learn:main",
+            "cognition-learn=mlagents.trainers.learn:main",
             "mlagents-run-experiment=mlagents.trainers.run_experiment:main",
             "mlagents-push-to-hf=mlagents.utils.push_to_hf:main",
             "mlagents-load-from-hf=mlagents.utils.load_from_hf:main",
