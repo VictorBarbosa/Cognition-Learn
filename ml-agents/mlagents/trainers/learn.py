@@ -3,6 +3,7 @@ from mlagents import torch_utils
 import yaml
 
 import os
+import sys
 import numpy as np
 import json
 
@@ -267,6 +268,16 @@ def run_cli(options: RunOptions) -> None:
 
 
 def main():
+    # Parse arguments first to check for --gui flag
+    # We use a temporary parser or just peek at sys.argv to avoid full validation yet,
+    # but since parse_command_line parses everything, we can use it and check the result options.
+    # However, parse_command_line returns RunOptions, which might fail validation if required args are missing.
+    # So checking sys.argv directly is safer for the flag.
+    if "--gui" in sys.argv:
+        from mlagents.trainers.gui_launcher import launch_gui
+        launch_gui()
+        return
+
     run_cli(parse_command_line())
 
 
