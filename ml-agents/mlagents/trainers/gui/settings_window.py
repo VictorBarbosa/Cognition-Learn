@@ -2,6 +2,8 @@ import sys
 import os
 import yaml
 import tempfile
+import time
+import socket
 from typing import Dict, Any, List
 
 from PyQt6.QtWidgets import (
@@ -55,7 +57,7 @@ class AlgorithmSettingsPage(QWidget):
                     
                     # Defaults if None
                     defaults = value if value else {"sequence_length": 64, "memory_size": 128}
-                    create_inputs(defaults, mem_layout, f"{full_key}. ")
+                    create_inputs(defaults, mem_layout, f"{full_key}.")
                     
                     # Set group layout
                     group_layout = QVBoxLayout()
@@ -73,7 +75,7 @@ class AlgorithmSettingsPage(QWidget):
                 elif isinstance(value, dict):
                     group = QGroupBox(key.replace('_', ' ').capitalize())
                     group_layout = QFormLayout()
-                    create_inputs(value, group_layout, f"{full_key}. ")
+                    create_inputs(value, group_layout, f"{full_key}.")
                     group.setLayout(group_layout)
                     layout.addRow(group)
                 elif isinstance(value, bool):
@@ -245,6 +247,25 @@ class SettingsWindow(QMainWindow):
 
         content_widget = QWidget()
         form_layout = QVBoxLayout(content_widget)
+
+        # 0. Load Configuration
+        config_group = QGroupBox("Load Configuration (YAML)")
+        config_layout = QHBoxLayout()
+        
+        self.config_path_le = QLineEdit()
+        self.config_path_le.setPlaceholderText("Select a YAML configuration file to load settings...")
+        config_layout.addWidget(self.config_path_le)
+        
+        self.browse_config_btn = QPushButton("Browse")
+        self.browse_config_btn.clicked.connect(self.browse_config_path)
+        config_layout.addWidget(self.browse_config_btn)
+        
+        self.load_config_btn = QPushButton("Load")
+        self.load_config_btn.clicked.connect(self.load_config_from_yaml)
+        config_layout.addWidget(self.load_config_btn)
+        
+        config_group.setLayout(config_layout)
+        form_layout.addWidget(config_group)
 
         # 1. Engine Settings
         engine_group = QGroupBox("Engine Settings")
@@ -577,6 +598,76 @@ class SettingsWindow(QMainWindow):
         # Initial UI update
         self.update_algo_list_ui()
 
+    def browse_config_path(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Select YAML Config", "", "YAML Files (*.yaml *.yml);;All Files (*)"
+        )
+        if filename:
+            self.config_path_le.setText(filename)
+
+    def load_config_from_yaml(self):
+        path = self.config_path_le.text().strip()
+        if not path or not os.path.exists(path):
+            QMessageBox.warning(self, "Error", "Invalid configuration file path.")
+            return
+            
+        try:
+            with open(path, 'r') as f:
+                config = yaml.safe_load(f)
+                
+            if not config:
+                return
+
+            # Basic population of fields if keys exist
+            # Engine Settings
+            if "engine_settings" in config:
+                es = config["engine_settings"]
+                if "width" in es: self.width_sb.setValue(es["width"])
+                if "height" in es: self.height_sb.setValue(es["height"])
+                if "quality_level" in es: self.quality_combo.setCurrentIndex(es["quality_level"])
+                if "time_scale" in es: 
+                    self.time_scale_slider.setValue(int(es["time_scale"]))
+                    self.time_scale_label.setText(str(es["time_scale"]))
+                if "target_frame_rate" in es: self.target_fps_sb.setValue(es["target_frame_rate"])
+                if "capture_frame_rate" in es: self.capture_fps_sb.setValue(es["capture_frame_rate"])
+                if "no_graphics" in es: self.no_graphics_cb.setChecked(es["no_graphics"])
+                if "no_graphics_monitor" in es: self.no_graphics_monitor_cb.setChecked(es["no_graphics_monitor"])
+
+            # Environment Settings
+            if "env_settings" in config:
+                env = config["env_settings"]
+                if "env_path" in env and env["env_path"]: self.env_path_le.setText(env["env_path"])
+                if "env_args" in env and env["env_args"]: self.env_args_le.setText(" ".join(env["env_args"]))
+                if "base_port" in env: self.base_port_sb.setValue(env["base_port"])
+                if "num_envs" in env: self.num_envs_sb.setValue(env["num_envs"])
+                if "num_areas" in env: self.num_areas_sb.setValue(env["num_areas"])
+                if "timeout_wait" in env: self.timeout_sb.setValue(env["timeout_wait"])
+                if "seed" in env: self.seed_sb.setValue(env["seed"])
+                if "max_lifetime_restarts" in env: self.max_restarts_sb.setValue(env["max_lifetime_restarts"])
+
+            # Checkpoint Settings
+            if "checkpoint_settings" in config:
+                cp = config["checkpoint_settings"]
+                if "run_id" in cp: self.run_id_le.setText(cp["run_id"])
+                if "results_dir" in cp: self.results_dir_le.setText(cp["results_dir"])
+                if "initialize_from" in cp and cp["initialize_from"]: self.init_from_le.setText(cp["initialize_from"])
+                if "resume" in cp: self.resume_rb.setChecked(cp["resume"])
+                if "force" in cp: self.force_rb.setChecked(cp["force"])
+                if "train_model" in cp: self.train_model_rb.setChecked(cp["train_model"])
+                if "inference" in cp: self.inference_rb.setChecked(cp["inference"])
+
+            # Behaviors (Simple assumption: single behavior or just taking first)
+            if "behaviors" in config:
+                behaviors = config["behaviors"]
+                if behaviors:
+                    b_name = list(behaviors.keys())[0]
+                    self.behavior_name_le.setText(b_name)
+                    
+            QMessageBox.information(self, "Success", "Configuration loaded successfully (partial).")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load config: {str(e)}")
+
     def browse_results_path(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Results Directory", self.results_dir_le.text())
         if dir_path:
@@ -803,6 +894,32 @@ class SettingsWindow(QMainWindow):
         """Allow returning to settings if training stops or fails immediately"""
         self.stacked_widget.setCurrentIndex(1)
 
+    def check_port_free(self, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            # 0 means success (connected), so not free
+            result = sock.connect_ex(('localhost', port))
+            return result != 0
+        finally:
+            sock.close()
+
+    def find_free_port_block(self, start_port, num_needed):
+        current_port = start_port
+        # Safety limit to prevent infinite loops
+        while current_port < 65000:
+            all_free = True
+            for i in range(num_needed):
+                if not self.check_port_free(current_port + i):
+                    all_free = False
+                    break
+            
+            if all_free:
+                return current_port
+            
+            # Jump past the occupied block or just increment
+            current_port += 1
+        return start_port
+
     def go_to_dashboard(self):
         """Collect configurations and start training directly"""
         
@@ -820,6 +937,19 @@ class SettingsWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_training)
         
         self.training_workers = []
+
+        # Automatic Port Handling
+        requested_port = self.base_port_sb.value()
+        num_envs = self.num_envs_sb.value()
+        
+        self.console_output.append(f"Checking availability for {num_envs} ports starting at {requested_port}...")
+        free_port = self.find_free_port_block(requested_port, num_envs)
+        
+        if free_port != requested_port:
+            self.console_output.append(f"Port {requested_port} (or subsequent) is busy. Switching to {free_port}.")
+            self.base_port_sb.setValue(free_port)
+        else:
+            self.console_output.append(f"Ports available starting at {free_port}.")
         
         # Common global settings
         global_max_steps = self.max_steps_sb.value()
@@ -906,58 +1036,184 @@ class SettingsWindow(QMainWindow):
                     except:
                         run_options["environment_parameters"][key] = val
 
-        # Collect Behaviors
-        selected_pages = []
-        for i in range(0, self.stacked_widget.count()):
-            page = self.stacked_widget.widget(i)
-            if isinstance(page, AlgorithmSettingsPage):
-                selected_pages.append(page)
+        # Collect Behaviors and determine workers to launch
+        workers_to_launch_info = [] # List of (algo_name, page, count)
         
-        if not selected_pages:
+        # Mapping algo_name -> Page
+        algo_to_page = {}
+        for i in range(self.stacked_widget.count()):
+            w = self.stacked_widget.widget(i)
+            if isinstance(w, AlgorithmSettingsPage):
+                algo_to_page[w.algo_name] = w
+
+        if self.same_algo_rb.isChecked():
+            # Find the selected radio
+            selected_algo = None
+            for algo, rb in self.algo_radio_widgets.items():
+                if rb.isChecked():
+                    selected_algo = algo
+                    break
+            if selected_algo and selected_algo in algo_to_page:
+                workers_to_launch_info.append((selected_algo, algo_to_page[selected_algo], self.num_envs_sb.value()))
+        else:
+            for algo, cb in self.algo_check_widgets.items():
+                if cb.isChecked() and algo in algo_to_page:
+                    count = self.algo_count_widgets[algo].value()
+                    if count > 0:
+                        workers_to_launch_info.append((algo, algo_to_page[algo], count))
+        
+        if not workers_to_launch_info:
             QMessageBox.critical(self, "Error", "No algorithms configured.")
             self.go_back_from_console()
             return
 
-        # Simple mode: use first configured algorithm
-        page = selected_pages[0]
-        behavior_name = self.behavior_name_le.text().strip() or "MoonlanderAgent"
-        
-        config, b_name = prepare_config_for_algo(page, behavior_name)
-        run_options["behaviors"][b_name] = config
+        base_run_id = self.run_id_le.text()
+        start_base_port = self.base_port_sb.value()
+        total_launched_count = 0
+        self.training_workers = []
 
-        # Save config
-        run_id = self.run_id_le.text()
-        tmp_dir = tempfile.gettempdir()
-        config_path = os.path.join(tmp_dir, f"config_{run_id}.yaml")
-        try:
-            with open(config_path, "w") as f:
-                yaml.dump(run_options, f, sort_keys=False)
-        except Exception as e:
-            self.console_output.append(f"Error saving config: {str(e)}")
-            self.back_to_config_btn.setEnabled(True)
-            return
+        for algo_name, page, worker_count in workers_to_launch_info:
+            # Prepare config for this algorithm once
+            behavior_name = self.behavior_name_le.text().strip() or "MoonlanderAgent"
+            config, b_name = prepare_config_for_algo(page, behavior_name)
+            
+            # Create a shared run_options template for this algo
+            # Note: num_envs here is just for the config file, the CLI arg overrides it
+            run_options = {
+                "behaviors": {b_name: config},
+                "env_settings": {
+                    "env_path": self.env_path_le.text() or None,
+                    "env_args": self.env_args_le.text().split() if self.env_args_le.text() else None,
+                    "base_port": start_base_port,
+                    "num_envs": worker_count if self.same_algo_rb.isChecked() else 1,
+                    "num_areas": self.num_areas_sb.value(),
+                    "timeout_wait": self.timeout_sb.value(),
+                    "seed": self.seed_sb.value(),
+                    "max_lifetime_restarts": self.max_restarts_sb.value(),
+                    "restarts_rate_limit_n": self.restarts_limit_n_sb.value(),
+                    "restarts_rate_limit_period_s": self.restarts_limit_period_sb.value(),
+                },
+                "engine_settings": {
+                    "width": self.width_sb.value(),
+                    "height": self.height_sb.value(),
+                    "quality_level": self.quality_combo.currentIndex(),
+                    "time_scale": float(self.time_scale_slider.value()),
+                    "target_frame_rate": self.target_fps_sb.value(),
+                    "capture_frame_rate": self.capture_fps_sb.value(),
+                    "no_graphics": self.no_graphics_cb.isChecked(),
+                    "no_graphics_monitor": self.no_graphics_monitor_cb.isChecked(),
+                },
+                "checkpoint_settings": {
+                    "run_id": base_run_id,
+                    "results_dir": self.results_dir_le.text(),
+                    "initialize_from": self.init_from_le.text() or None,
+                    "resume": self.resume_rb.isChecked(),
+                    "force": self.force_rb.isChecked(),
+                    "train_model": self.train_model_rb.isChecked(),
+                    "inference": self.inference_rb.isChecked(),
+                },
+                "torch_settings": {
+                    "device": self.device_combo.currentText(),
+                },
+                "debug": self.debug_cb.isChecked(),
+                "environment_parameters": {}
+            }
 
-        # Construct Command
-        cmd = [
-            sys.executable, "-m", "mlagents.trainers.learn",
-            config_path,
-            "--run-id", run_id
-        ]
-        # CLI flags still useful for overriding or specific ml-agents behavior
-        if self.resume_rb.isChecked(): cmd.append("--resume")
-        if self.force_rb.isChecked(): cmd.append("--force")
-        if self.inference_rb.isChecked(): cmd.append("--inference")
-        
-        workers_to_launch = [(cmd, run_id)]
-        
-        # Launch workers
-        for cmd, name in workers_to_launch:
-            self.console_output.append(f"Starting {name}...")
-            worker = TrainingWorker(cmd, name=name)
+            # Collect Environment Parameters
+            if hasattr(self, 'param_widgets'):
+                for p in self.param_widgets:
+                    key = p['key'].text().strip()
+                    val = p['val'].text().strip()
+                    if key:
+                        try:
+                            if "." in val: run_options["environment_parameters"][key] = float(val)
+                            else: run_options["environment_parameters"][key] = int(val)
+                        except: run_options["environment_parameters"][key] = val
+
+            # Save a common config file for this algorithm
+            tmp_dir = tempfile.gettempdir()
+            config_path = os.path.join(tmp_dir, f"config_{base_run_id}_{algo_name}.yaml")
+            try:
+                with open(config_path, "w") as f:
+                    yaml.dump(run_options, f, sort_keys=False)
+            except Exception as e:
+                self.console_output.append(f"Error saving config for {algo_name}: {str(e)}")
+                continue
+
+            # Determine iterations: 1 per algorithm (grouping workers)
+            # Launch ONE process per algorithm, passing the worker_count as --num-envs
+            
+            worker_port = start_base_port + total_launched_count
+            
+            # Construct Command
+            cmd = [
+                sys.executable, "-m", "mlagents.trainers.learn",
+                config_path
+            ]
+
+            # Run ID Logic
+            if self.same_algo_rb.isChecked():
+                 # Single algorithm mode
+                 cmd.extend(["--run-id", base_run_id])
+            else:
+                 # Multi algorithm mode: differentiate run-id by algo name
+                 # If base_run_id already contains algo_name, avoid redundancy? 
+                 # User requested specific format. Let's stick to algo_runid
+                 run_id_formatted = f"{algo_name}_{base_run_id}"
+                 cmd.extend(["--run-id", run_id_formatted])
+            
+            # Num Envs (Workers)
+            cmd.extend(["--num-envs", str(worker_count)])
+            
+            cmd.extend(["--base-port", str(worker_port)])
+
+            # Add extra CLI arguments
+            env_path = self.env_path_le.text().strip()
+            if env_path: cmd.extend(["--env", env_path])
+            
+            env_args = self.env_args_le.text().strip()
+            if env_args: cmd.extend(["--env-args"] + env_args.split())
+
+            cmd.extend(["--num-areas", str(self.num_areas_sb.value())])
+            cmd.extend(["--timeout-wait", str(self.timeout_sb.value())])
+            if self.seed_sb.value() != -1: cmd.extend(["--seed", str(self.seed_sb.value())])
+            
+            cmd.extend(["--width", str(self.width_sb.value())])
+            cmd.extend(["--height", str(self.height_sb.value())])
+            cmd.extend(["--quality-level", str(self.quality_combo.currentIndex())])
+            cmd.extend(["--time-scale", str(self.time_scale_slider.value())])
+            cmd.extend(["--target-frame-rate", str(self.target_fps_sb.value())])
+            cmd.extend(["--capture-frame-rate", str(self.capture_fps_sb.value())])
+            
+            if self.no_graphics_cb.isChecked(): cmd.append("--no-graphics")
+            
+            cmd.extend(["--torch-device", self.device_combo.currentText()])
+            cmd.extend(["--results-dir", self.results_dir_le.text()])
+            
+            init_from = self.init_from_le.text().strip()
+            if init_from: cmd.extend(["--initialize-from", init_from])
+            if self.debug_cb.isChecked(): cmd.append("--debug")
+            if self.resume_rb.isChecked(): cmd.append("--resume")
+            if self.force_rb.isChecked(): cmd.append("--force")
+            if self.inference_rb.isChecked(): cmd.append("--inference")
+
+            # Log and Start Process
+            name_log = base_run_id if self.same_algo_rb.isChecked() else f"{algo_name}_{base_run_id}"
+            self.console_output.append(f"--- Launching Algorithm Group: {algo_name} (Envs: {worker_count}) ---")
+            self.console_output.append(f"Command: {' '.join(cmd)}")
+            
+            worker = TrainingWorker(cmd, name=name_log)
             worker.output_received.connect(self.log_signal.emit)
             worker.finished.connect(self.on_worker_finished)
             worker.start()
             self.training_workers.append(worker)
+            
+            # Increment port counter by the number of environments this process will consume
+            total_launched_count += worker_count 
+
+        self.console_output.append(f"Total processes launched: {len(self.training_workers)}")
+        # Update UI base port for next manual run to avoid collision
+        self.base_port_sb.setValue(start_base_port + total_launched_count)
 
     def on_worker_finished(self, code):
         self.console_output.append(f"Worker finished with code {code}")
