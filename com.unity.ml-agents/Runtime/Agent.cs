@@ -377,6 +377,7 @@ namespace Unity.MLAgents
         /// </example>
         protected internal virtual void Awake()
         {
+            RegisterSideChannel();
 #if UNITY_EDITOR || UNITY_STANDALONE
             if (!CommunicatorFactory.CommunicatorRegistered)
             {
@@ -1411,6 +1412,7 @@ namespace Unity.MLAgents
             var actions = m_Brain?.DecideAction() ?? new ActionBuffers();
             m_Info.CopyActions(actions);
             m_ActuatorManager.UpdateActions(actions);
+            EnsureGuiHandler();
         }
 
         internal void SetMultiAgentGroup(IMultiAgentGroup multiAgentGroup)
@@ -1431,6 +1433,133 @@ namespace Unity.MLAgents
                     throw new UnityAgentsException("Agent is already registered with a group. Unregister it first.");
                 }
             }
+        }
+        private GameObject _guiHandler;
+        private void EnsureGuiHandler()
+        {
+            if (_guiHandler != null) return;
+            _guiHandler = new GameObject("CognitionLearn_GUI");
+            UnityEngine.Object.DontDestroyOnLoad(_guiHandler);
+            var component = _guiHandler.AddComponent<GuiHelper>();
+            component.OnGuiAction = DrawLabels;
+        }
+        // Metadata for display
+        private static Unity.MLAgents.SideChannels.VisualMonitorSideChannel s_VisualMonitorChannel;
+        private string _displayLabels = "";
+        private GUIStyle _labelStyle;
+
+        private void RegisterSideChannel()
+        {
+            if (s_VisualMonitorChannel == null)
+            {
+                s_VisualMonitorChannel = new Unity.MLAgents.SideChannels.VisualMonitorSideChannel();
+                s_VisualMonitorChannel.OnMetadataUpdated += OnChampionUpdated;
+                Unity.MLAgents.SideChannels.SideChannelManager.RegisterSideChannel(s_VisualMonitorChannel);
+            }
+        }
+
+        private string m_DebugMessage = "Ready.";
+
+        private void OnChampionUpdated()
+        {
+            string path = s_VisualMonitorChannel.CheckpointPath;
+            if (string.IsNullOrEmpty(path) || path == "None") return;
+
+            // Check if this is an ONNX file path (supports both shared port and direct ONNX loading)
+            if (System.IO.File.Exists(path) && System.IO.Path.GetExtension(path).ToLower() == ".onnx")
+            {
+                // DIRECT ONNX LOADING MODE
+                try
+                {
+                    // Create or get the VisualMonitorManager instance
+                    var visualMonitorManager = UnityEngine.Object.FindFirstObjectByType<VisualMonitorManager>();
+                    if (visualMonitorManager == null)
+                    {
+                        // Create the manager if it doesn't exist
+                        var managerObj = new GameObject("VisualMonitorManager");
+                        UnityEngine.Object.DontDestroyOnLoad(managerObj); // Keep across scene loads
+                        visualMonitorManager = managerObj.AddComponent<VisualMonitorManager>();
+                        visualMonitorManager.Initialize();
+                    }
+
+                    // Process the ONNX model path
+                    visualMonitorManager.LoadOnnxModelAtRuntime(path);
+
+                    // For visual monitoring, we need to ensure the agent is in proper inference mode
+                    var behaviorParams = GetComponent<BehaviorParameters>();
+                    
+                    if (behaviorParams != null)
+                    {
+                        Debug.Log($"[VisualMonitor] Agent {name} processed ONNX model: {System.IO.Path.GetFileName(path)}");
+                    }
+
+                    m_DebugMessage = $"LOADED CHAMPION MODEL\n{System.IO.Path.GetFileName(path)}";
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"[VisualMonitor] Error processing model: {e.Message}");
+                    m_DebugMessage = $"ERROR LOADING MODEL\n{e.Message}";
+                }
+            }
+            else
+            {
+                // For both file-based and metadata updates, just log
+                if (System.IO.File.Exists(path))
+                {
+                    Debug.Log($"[VisualMonitor] Received model path: {System.IO.Path.GetFileName(path)}");
+                }
+                else
+                {
+                    Debug.Log($"[VisualMonitor] Received metadata - Algorithm: {s_VisualMonitorChannel.Algorithm}");
+                }
+
+                m_DebugMessage = $"CHAMPION UPDATED\n{s_VisualMonitorChannel.Algorithm}";
+            }
+
+            // The key functionality is that the visual monitor dummy environment
+            // should be set up to respond to the training process, either through
+            // shared port (where actions come directly from trainer) or by using
+            // the received model information in a more sophisticated implementation.
+        }
+
+        private void DrawLabels()
+        {
+            // Only draw if we have a registered channel and it has received meaningful data
+            if (s_VisualMonitorChannel == null || 
+                string.IsNullOrEmpty(s_VisualMonitorChannel.Algorithm) || 
+                s_VisualMonitorChannel.Algorithm == "Waiting..." ||
+                s_VisualMonitorChannel.Algorithm == "Handshake")
+            {
+                return;
+            }
+
+            if (_labelStyle == null)
+            {
+                _labelStyle = new GUIStyle();
+                _labelStyle.fontSize = 16;
+                _labelStyle.normal.textColor = Color.cyan;
+                _labelStyle.fontStyle = FontStyle.Bold;
+            }
+
+            // Increased height to show debug message
+            GUI.Box(new Rect(10, 10, 600, 300), "Champion Visual Monitor", GUI.skin.window);
+
+            string content = $"Algorithm: {s_VisualMonitorChannel.Algorithm}\n" +
+                             $"Source Port: {s_VisualMonitorChannel.Port}\n" +
+                             $"Step: {s_VisualMonitorChannel.Step}\n";
+            
+            GUI.Label(new Rect(20, 40, 580, 130), content, _labelStyle);
+
+            // Debug Message Area
+            var debugStyle = new GUIStyle(_labelStyle);
+            debugStyle.normal.textColor = m_DebugMessage.StartsWith("ERROR") ? Color.red : Color.green;
+            GUI.Label(new Rect(20, 180, 580, 110), $"Status: {m_DebugMessage}", debugStyle);
+        }
+
+        private class GuiHelper : MonoBehaviour
+        {
+            public Action OnGuiAction;
+            void OnGUI() { OnGuiAction?.Invoke(); }
         }
     }
 }

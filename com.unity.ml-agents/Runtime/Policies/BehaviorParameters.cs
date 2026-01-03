@@ -290,5 +290,16 @@ namespace Unity.MLAgents.Policies
             agent.ReloadPolicy();
             OnPolicyUpdated?.Invoke(IsInHeuristicMode());
         }
+        // Added for runtime hot-swapping support without ModelAsset
+        private Model m_RuntimeModel;
+
+            /// <summary>
+        /// Sets a runtime Sentis Model to be used for inference, overriding the ModelAsset.
+        /// </summary>
+        /// <param name="model">The loaded Sentis Model.</param>
+        public void SetRuntimeModel(Model model)
+        {
+            m_RuntimeModel = model;
+        }
     }
 }

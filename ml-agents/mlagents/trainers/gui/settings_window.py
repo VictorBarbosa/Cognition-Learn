@@ -395,12 +395,12 @@ class SettingsWindow(QMainWindow):
 
         self.summary_freq_sb = QSpinBox()
         self.summary_freq_sb.setRange(1, 1000000)
-        self.summary_freq_sb.setValue(50000)
+        self.summary_freq_sb.setValue(5000)
         trainer_form.addRow("Summary Freq:", self.summary_freq_sb)
 
         self.checkpoint_interval_sb = QSpinBox()
         self.checkpoint_interval_sb.setRange(1, 1000000)
-        self.checkpoint_interval_sb.setValue(500000)
+        self.checkpoint_interval_sb.setValue(5000)
         trainer_form.addRow("Checkpoint Interval:", self.checkpoint_interval_sb)
 
         self.keep_checkpoints_sb = QSpinBox()
@@ -1072,13 +1072,41 @@ class SettingsWindow(QMainWindow):
         total_launched_count = 0
         self.training_workers = []
 
+        # --- Launch Visual Monitor (Dummy) - MUST BE FIRST ---
+        if self.visual_monitor_cb.isChecked():
+            monitor_port = start_base_port + total_launched_count
+            
+            cmd = [
+                sys.executable, "-m", "mlagents.trainers.gui.visual_monitor",
+                "--run-id", "VisualMonitor",
+                "--base-port", str(monitor_port),
+                "--width", str(self.width_sb.value()),
+                "--height", str(self.height_sb.value()),
+                "--time-scale", "1.0", # Forced real-time
+                "--results-dir", self.results_dir_le.text()
+            ]
+            
+            env_path = self.env_path_le.text().strip()
+            if env_path:
+                cmd.extend(["--env", env_path])
+            
+            self.console_output.append(f"--- Launching Visual Monitor (Dummy) ---")
+            self.console_output.append(f"Command: {' '.join(cmd)}")
+            
+            worker = TrainingWorker(cmd, name="visual_monitor")
+            worker.output_received.connect(self.log_signal.emit)
+            worker.finished.connect(self.on_worker_finished)
+            worker.start()
+            self.training_workers.append(worker)
+            
+            total_launched_count += 1
+
         for algo_name, page, worker_count in workers_to_launch_info:
             # Prepare config for this algorithm once
             behavior_name = self.behavior_name_le.text().strip() or "MoonlanderAgent"
             config, b_name = prepare_config_for_algo(page, behavior_name)
             
             # Create a shared run_options template for this algo
-            # Note: num_envs here is just for the config file, the CLI arg overrides it
             run_options = {
                 "behaviors": {b_name: config},
                 "env_settings": {
@@ -1141,8 +1169,6 @@ class SettingsWindow(QMainWindow):
                 continue
 
             # Determine iterations: 1 per algorithm (grouping workers)
-            # Launch ONE process per algorithm, passing the worker_count as --num-envs
-            
             worker_port = start_base_port + total_launched_count
             
             # Construct Command
@@ -1153,18 +1179,12 @@ class SettingsWindow(QMainWindow):
 
             # Run ID Logic
             if self.same_algo_rb.isChecked():
-                 # Single algorithm mode
                  cmd.extend(["--run-id", base_run_id])
             else:
-                 # Multi algorithm mode: differentiate run-id by algo name
-                 # If base_run_id already contains algo_name, avoid redundancy? 
-                 # User requested specific format. Let's stick to algo_runid
                  run_id_formatted = f"{algo_name}_{base_run_id}"
                  cmd.extend(["--run-id", run_id_formatted])
             
-            # Num Envs (Workers)
             cmd.extend(["--num-envs", str(worker_count)])
-            
             cmd.extend(["--base-port", str(worker_port)])
 
             # Add extra CLI arguments
@@ -1208,7 +1228,6 @@ class SettingsWindow(QMainWindow):
             worker.start()
             self.training_workers.append(worker)
             
-            # Increment port counter by the number of environments this process will consume
             total_launched_count += worker_count 
 
         self.console_output.append(f"Total processes launched: {len(self.training_workers)}")
