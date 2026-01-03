@@ -567,10 +567,13 @@ class SettingsWindow(QMainWindow):
         # Algorithm definitions
         self.algorithms = [
             "ppo",
-            # "ppo_et", "ppo_ce",
+            "ppo_et", 
+            # "ppo_ce",
             "sac",
             # "sac_ae",
-            # "poca", "tdsac", "td3", "tqc", "drqv2", "dcac", "crossq"
+            # "poca", "tdsac",
+            "td3", 
+            # "tqc", "drqv2", "dcac", "crossq"
         ]
 
         self.algo_radio_widgets = {}
@@ -655,6 +658,11 @@ class SettingsWindow(QMainWindow):
                 if "force" in cp: self.force_rb.setChecked(cp["force"])
                 if "train_model" in cp: self.train_model_rb.setChecked(cp["train_model"])
                 if "inference" in cp: self.inference_rb.setChecked(cp["inference"])
+
+            # Torch Settings
+            if "torch_settings" in config:
+                ts = config["torch_settings"]
+                if "device" in ts: self.device_combo.setCurrentText(ts["device"])
 
             # Behaviors (Simple assumption: single behavior or just taking first)
             if "behaviors" in config:
