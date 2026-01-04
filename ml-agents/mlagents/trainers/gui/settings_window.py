@@ -568,12 +568,17 @@ class SettingsWindow(QMainWindow):
         self.algorithms = [
             "ppo",
             "ppo_et", 
-            # "ppo_ce",
+            "ppo_ce",
             "sac",
             # "sac_ae",
-            # "poca", "tdsac",
+            # "poca",
+            "tdsac",
             "td3", 
-            # "tqc", "drqv2", "dcac", "crossq"
+            "tqc", 
+            "drqv2", 
+            "dcac", 
+            "crossq",
+            "dreamer"
         ]
 
         self.algo_radio_widgets = {}

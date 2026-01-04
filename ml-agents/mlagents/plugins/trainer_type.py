@@ -5,14 +5,28 @@ from mlagents import plugins as mla_plugins
 from mlagents.plugins import ML_AGENTS_TRAINER_TYPE
 from mlagents.trainers.poca.optimizer_torch import POCASettings
 from mlagents.trainers.poca.trainer import POCATrainer
+from mlagents.trainers.crossq.optimizer_torch import CrossQSettings
+from mlagents.trainers.crossq.trainer import CrossQTrainer
+from mlagents.trainers.dcac.optimizer_torch import DCACSettings
+from mlagents.trainers.dcac.trainer import DCACTrainer
+from mlagents.trainers.drqv2.optimizer_torch import DrQv2Settings
+from mlagents.trainers.drqv2.trainer import DrQv2Trainer
+from mlagents.trainers.dreamer.settings import DreamerSettings
+from mlagents.trainers.dreamer.trainer import DreamerTrainer
 from mlagents.trainers.ppo.optimizer_torch import PPOSettings
 from mlagents.trainers.ppo.trainer import PPOTrainer
+from mlagents.trainers.ppo_ce.settings import PPOCESettings
+from mlagents.trainers.ppo_ce.trainer import PPOCETrainer
 from mlagents.trainers.ppo_et.settings import PPOETSettings
 from mlagents.trainers.ppo_et.trainer import PPOETTrainer
 from mlagents.trainers.sac.optimizer_torch import SACSettings
 from mlagents.trainers.sac.trainer import SACTrainer
 from mlagents.trainers.td3.optimizer_torch import TD3Settings
 from mlagents.trainers.td3.trainer import TD3Trainer
+from mlagents.trainers.tdsac.optimizer_torch import TDSACSettings
+from mlagents.trainers.tdsac.trainer import TDSACTrainer
+from mlagents.trainers.tqc.optimizer_torch import TQCSettings
+from mlagents.trainers.tqc.trainer import TQCTrainer
 from mlagents_envs import logging_util
 
 logger = logging_util.get_logger(__name__)
@@ -27,9 +41,16 @@ def get_default_trainer_types() -> Tuple[Dict[str, Any], Dict[str, Any]]:
         {
             PPOTrainer.get_trainer_name(): PPOTrainer,
             PPOETTrainer.get_trainer_name(): PPOETTrainer,
+            PPOCETrainer.get_trainer_name(): PPOCETrainer,
             SACTrainer.get_trainer_name(): SACTrainer,
             POCATrainer.get_trainer_name(): POCATrainer,
             TD3Trainer.get_trainer_name(): TD3Trainer,
+            TDSACTrainer.get_trainer_name(): TDSACTrainer,
+            TQCTrainer.get_trainer_name(): TQCTrainer,
+            DrQv2Trainer.get_trainer_name(): DrQv2Trainer,
+            DCACTrainer.get_trainer_name(): DCACTrainer,
+            CrossQTrainer.get_trainer_name(): CrossQTrainer,
+            DreamerTrainer.get_trainer_name(): DreamerTrainer,
         }
     )
     # global all_trainer_settings
@@ -37,9 +58,16 @@ def get_default_trainer_types() -> Tuple[Dict[str, Any], Dict[str, Any]]:
         {
             PPOTrainer.get_trainer_name(): PPOSettings,
             PPOETTrainer.get_trainer_name(): PPOETSettings,
+            PPOCETrainer.get_trainer_name(): PPOCESettings,
             SACTrainer.get_trainer_name(): SACSettings,
             POCATrainer.get_trainer_name(): POCASettings,
             TD3Trainer.get_trainer_name(): TD3Settings,
+            TDSACTrainer.get_trainer_name(): TDSACSettings,
+            TQCTrainer.get_trainer_name(): TQCSettings,
+            DrQv2Trainer.get_trainer_name(): DrQv2Settings,
+            DCACTrainer.get_trainer_name(): DCACSettings,
+            CrossQTrainer.get_trainer_name(): CrossQSettings,
+            DreamerTrainer.get_trainer_name(): DreamerSettings,
         }
     )
 
