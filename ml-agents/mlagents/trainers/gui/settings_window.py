@@ -19,7 +19,7 @@ from mlagents.trainers.gui.workers import TrainingWorker
 
 class AlgorithmSettingsPage(QWidget):
     """Dynamically generated settings page for a specific algorithm"""
-    def __init__(self, algo_name, on_back, on_next, is_last=False):
+    def __init__(self, algo_name, on_back, on_next, is_last=False, global_resume=False):
         super().__init__()
         self.algo_name = algo_name
         layout = QVBoxLayout(self)
@@ -35,6 +35,22 @@ class AlgorithmSettingsPage(QWidget):
 
         content = QWidget()
         form = QFormLayout(content)
+
+        # Resume / Initialization Section (New)
+        if global_resume:
+            self.resume_group = QGroupBox("Resume Configuration")
+            self.resume_group.setStyleSheet("QGroupBox { border: 2px solid #FFD600; }")
+            res_layout = QHBoxLayout()
+            self.checkpoint_le = QLineEdit()
+            self.checkpoint_le.setPlaceholderText("Path to .onnx or .pt checkpoint (Leave empty to skip resume for this algo)")
+            res_layout.addWidget(self.checkpoint_le)
+            self.browse_cp_btn = QPushButton("Browse")
+            self.browse_cp_btn.clicked.connect(self.browse_checkpoint)
+            res_layout.addWidget(self.browse_cp_btn)
+            self.resume_group.setLayout(res_layout)
+            form.addRow(self.resume_group)
+        else:
+            self.checkpoint_le = None
 
         # Hyperparameters specific to this algorithm
         hp_group = QGroupBox("Algorithm Specific Hyperparameters")
@@ -136,6 +152,13 @@ class AlgorithmSettingsPage(QWidget):
         btn_layout.addWidget(next_btn)
 
         layout.addLayout(btn_layout)
+
+    def browse_checkpoint(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Select Checkpoint", "", "ML-Agents Checkpoint (*.onnx *.pt);;All Files (*)"
+        )
+        if filename:
+            self.checkpoint_le.setText(filename)
 
     def get_config(self) -> Dict[str, Any]:
         res = {
@@ -847,6 +870,7 @@ class SettingsWindow(QMainWindow):
             return
 
         # Create pages
+        is_global_resume = self.resume_rb.isChecked()
         for i, algo in enumerate(selected_algos):
             is_last = (i == len(selected_algos) - 1)
             
@@ -869,7 +893,8 @@ class SettingsWindow(QMainWindow):
                 algo, 
                 on_back=back_cb, 
                 on_next=next_cb, 
-                is_last=is_last
+                is_last=is_last,
+                global_resume=is_global_resume
             )
             self.stacked_widget.addWidget(page)
         
@@ -1238,13 +1263,35 @@ class SettingsWindow(QMainWindow):
             cmd.extend(["--torch-device", self.device_combo.currentText()])
             cmd.extend(["--results-dir", self.results_dir_le.text()])
             
+            # --- Per-Algorithm Resume Logic ---
+            algo_checkpoint = ""
+            if hasattr(page, 'checkpoint_le') and page.checkpoint_le:
+                algo_checkpoint = page.checkpoint_le.text().strip()
+            
+            is_resuming_this_algo = False
+            if self.resume_rb.isChecked():
+                if algo_checkpoint:
+                    # Global resume is ON and we have a specific checkpoint
+                    cmd.append("--resume")
+                    cmd.extend(["--initialize-from", algo_checkpoint])
+                    is_resuming_this_algo = True
+                else:
+                    # Global resume is ON but NO checkpoint provided for this algo
+                    # User said: "se esse campo estiver vazio então o resume é ignorado para esse algorimo"
+                    self.console_output.append(f"[INFO] Skipping resume for {algo_name} because no checkpoint was specified.")
+                    # (We don't add --resume)
+            
             init_from = self.init_from_le.text().strip()
-            if init_from: cmd.extend(["--initialize-from", init_from])
+            if init_from and not is_resuming_this_algo: # Only use global if not specific
+                cmd.extend(["--initialize-from", init_from])
+
             if self.debug_cb.isChecked(): cmd.append("--debug")
-            if self.resume_rb.isChecked(): cmd.append("--resume")
+            # Add resume/force/inference only if they weren't handled by the specific logic above
+            if self.resume_rb.isChecked() and is_resuming_this_algo and "--resume" not in cmd:
+                 cmd.append("--resume")
+            
             if self.force_rb.isChecked(): cmd.append("--force")
             if self.inference_rb.isChecked(): cmd.append("--inference")
-
             # Log and Start Process
             name_log = base_run_id if self.same_algo_rb.isChecked() else f"{algo_name}_{base_run_id}"
             self.console_output.append(f"--- Launching Algorithm Group: {algo_name} (Envs: {worker_count}) ---")
