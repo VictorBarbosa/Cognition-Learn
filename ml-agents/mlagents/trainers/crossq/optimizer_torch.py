@@ -266,6 +266,7 @@ class TorchCrossQOptimizer(TorchOptimizer):
         next_obs = [ModelUtils.list_to_tensor(obs) for obs in next_obs]
 
         actions = AgentAction.from_buffer(batch)
+        act_masks = ModelUtils.list_to_tensor(batch[BufferKey.ACTION_MASK])
 
         memories_list = [
             ModelUtils.list_to_tensor(batch[BufferKey.MEMORY][i])
@@ -296,7 +297,10 @@ class TorchCrossQOptimizer(TorchOptimizer):
 
         with torch.no_grad():
             next_action, _, _ = self.target_actor.get_action_and_stats(
-                next_obs, memories=memories, sequence_length=self.policy.sequence_length
+                next_obs, 
+                memories=memories, 
+                sequence_length=self.policy.sequence_length,
+                masks=act_masks
             )
             noise = torch.randn_like(next_action.continuous_tensor) * self.target_policy_noise
             noise = torch.clamp(noise, -self.noise_clip, self.noise_clip)
@@ -306,6 +310,16 @@ class TorchCrossQOptimizer(TorchOptimizer):
             target_q1, target_q2 = self.target_q_network(
                 next_obs, noisy_continuous_action, memories=q_memories, sequence_length=self.policy.sequence_length
             )
+            
+            # Condense target Q-values if discrete
+            if self._action_spec.discrete_size > 0:
+                d_next_actions = next_action.discrete_tensor.long()
+                if d_next_actions.dim() > 2:
+                    d_next_actions = d_next_actions.reshape(d_next_actions.shape[0], -1)
+                
+                for name in target_q1:
+                    target_q1[name] = target_q1[name].gather(1, d_next_actions)
+                    target_q2[name] = target_q2[name].gather(1, d_next_actions)
 
         q1_out, q2_out = self.q_network(
             current_obs,
@@ -313,9 +327,24 @@ class TorchCrossQOptimizer(TorchOptimizer):
             memories=q_memories,
             sequence_length=self.policy.sequence_length,
         )
+        
+        # Condense prediction Q-values if discrete
+        if self._action_spec.discrete_size > 0:
+            d_actions = actions.discrete_tensor.long()
+            if d_actions.dim() > 2:
+                d_actions = d_actions.reshape(d_actions.shape[0], -1)
+            
+            for name in q1_out:
+                q1_out[name] = q1_out[name].gather(1, d_actions)
+                q2_out[name] = q2_out[name].gather(1, d_actions)
 
         masks = ModelUtils.list_to_tensor(batch[BufferKey.MASKS], dtype=torch.bool)
         dones = ModelUtils.list_to_tensor(batch[BufferKey.DONE])
+        if dones.dim() == 1: dones = dones.unsqueeze(1)
+        
+        # Ensure rewards are 2D
+        for name in rewards:
+            if rewards[name].dim() == 1: rewards[name] = rewards[name].unsqueeze(1)
 
         # CrossQ update
         q1_loss = self.q_loss(q1_out, target_q2, dones, rewards, masks)
@@ -340,6 +369,7 @@ class TorchCrossQOptimizer(TorchOptimizer):
                 current_obs,
                 memories=memories,
                 sequence_length=self.policy.sequence_length,
+                masks=act_masks
             )
             q1p_out, _ = self.q_network(
                 current_obs,
