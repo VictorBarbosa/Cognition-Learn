@@ -12,7 +12,7 @@ from mlagents.trainers.torch_entities.networks import ValueNetwork, SharedActorC
 from mlagents.trainers.torch_entities.agent_action import AgentAction
 from mlagents.trainers.torch_entities.action_log_probs import ActionLogProbs
 from mlagents.trainers.torch_entities.utils import ModelUtils
-from mlagents.trainers.buffer import AgentBuffer, BufferKey, RewardSignalUtil
+from mlagents.trainers.buffer import AgentBuffer, BufferKey, RewardSignalUtil, AgentBufferField
 from mlagents_envs.timers import timed
 from mlagents_envs.base_env import ActionSpec, ObservationSpec
 from mlagents.trainers.exception import UnityTrainerException
@@ -124,6 +124,10 @@ class TorchTQCOptimizer(TorchOptimizer):
             )
             return q1_out, q2_out
 
+        def update_normalization(self, buffer: AgentBuffer) -> None:
+            self.q1_network.update_normalization(buffer)
+            self.q2_network.update_normalization(buffer)
+
     class TargetEntropy(NamedTuple):
         discrete: List[float] = []  # One per branch
         continuous: float = 0.0
@@ -202,6 +206,7 @@ class TorchTQCOptimizer(TorchOptimizer):
             ),
             requires_grad=True,
         )
+
         _cont_log_ent_coef = torch.nn.Parameter(
             torch.log(torch.as_tensor([self.init_entcoef])), requires_grad=True
         )
@@ -242,14 +247,59 @@ class TorchTQCOptimizer(TorchOptimizer):
 
     @property
     def critic(self):
-        # TQC does not have a separate V-network like SAC, so we return one of the Q-networks for normalization purposes.
-        return self.q_network.q1_network
+        return self.q_network
 
     def _move_to_device(self, device: torch.device) -> None:
         self._log_ent_coef.to(device)
         self.q_network.to(device)
         self.target_q_network.to(device)
         self.target_actor.to(device)
+
+    def get_trajectory_value_estimates(
+        self,
+        batch: AgentBuffer,
+        next_obs: List[np.ndarray],
+        done: bool,
+        agent_id: str = "",
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, float], Optional[AgentBufferField]]:
+        n_obs = len(self.policy.behavior_spec.observation_specs)
+        
+        current_obs = ObsUtil.from_buffer(batch, n_obs)
+        current_obs = [ModelUtils.list_to_tensor(obs) for obs in current_obs]
+        
+        actions = AgentAction.from_buffer(batch)
+        cont_actions = actions.continuous_tensor
+        
+        # TQC implementation in ML-Agents currently doesn't support recurrence fully,
+        # but if LSTM is enabled in config, we must pass valid memory tensors initialized to zero.
+        memories_list = [
+            ModelUtils.list_to_tensor(batch[BufferKey.MEMORY][i])
+            for i in range(0, len(batch[BufferKey.MEMORY]), self.policy.sequence_length)
+        ]
+        
+        real_seq_len = current_obs[0].shape[0]
+        
+        if len(memories_list) > 0:
+            # Create zeroed memories matching the actor memory shape structure
+            actor_memories = torch.stack(memories_list).unsqueeze(0)
+            memories = torch.zeros_like(actor_memories)
+        else:
+            memories = None
+        
+        with torch.no_grad():
+            q1_out, _ = self.q_network(
+                current_obs, 
+                actions=cont_actions, 
+                memories=memories, 
+                sequence_length=real_seq_len
+            )
+            
+            value_estimates = {}
+            for name, q_quantiles in q1_out.items():
+                # Average quantiles to get mean Q-value estimate
+                value_estimates[name] = ModelUtils.to_numpy(q_quantiles.mean(dim=1))
+                
+        return value_estimates, {}, None
 
     @timed
     def update(self, batch: AgentBuffer, num_sequences: int) -> Dict[str, float]:
@@ -269,13 +319,31 @@ class TorchTQCOptimizer(TorchOptimizer):
         act_masks = ModelUtils.list_to_tensor(batch[BufferKey.ACTION_MASK])
         actions = AgentAction.from_buffer(batch)
 
-        memories = None # TQC doesn't support recurrence yet
+        memories_list = [
+            ModelUtils.list_to_tensor(batch[BufferKey.MEMORY][i])
+            for i in range(0, len(batch[BufferKey.MEMORY]), self.policy.sequence_length)
+        ]
+        
+        if len(memories_list) > 0:
+            memories = torch.stack(memories_list).unsqueeze(0)
+        else:
+            memories = None
 
         # Update Critic
         with torch.no_grad():
-            next_action, next_log_prob_dict, _ = self.target_actor.get_action_and_stats(next_obs, memories=memories, masks=act_masks)
+            next_action, next_log_prob_dict, _ = self.target_actor.get_action_and_stats(
+                next_obs, 
+                memories=memories, 
+                masks=act_masks,
+                sequence_length=self.policy.sequence_length
+            )
             next_log_probs = next_log_prob_dict['log_probs'].continuous_tensor
-            target_q1_out, target_q2_out = self.target_q_network(next_obs, next_action.continuous_tensor, memories=memories)
+            target_q1_out, target_q2_out = self.target_q_network(
+                next_obs, 
+                next_action.continuous_tensor, 
+                memories=memories,
+                sequence_length=self.policy.sequence_length
+            )
             
             target_q_cat = torch.cat(
                 (target_q1_out[self.stream_names[0]].unsqueeze(1), target_q2_out[self.stream_names[0]].unsqueeze(1)), dim=1
@@ -293,7 +361,12 @@ class TorchTQCOptimizer(TorchOptimizer):
             target_q += ent_term.unsqueeze(1)
             q_backup = rewards[self.stream_names[0]].unsqueeze(1) + self.gammas[0] * (1 - ModelUtils.list_to_tensor(batch[BufferKey.DONE])).unsqueeze(1) * target_q
 
-        q1_out, q2_out = self.q_network(current_obs, actions.continuous_tensor, memories=memories)
+        q1_out, q2_out = self.q_network(
+            current_obs, 
+            actions.continuous_tensor, 
+            memories=memories,
+            sequence_length=self.policy.sequence_length
+        )
         q1_quantiles = q1_out[self.stream_names[0]]
         q2_quantiles = q2_out[self.stream_names[0]]
 
@@ -306,10 +379,20 @@ class TorchTQCOptimizer(TorchOptimizer):
         self.value_optimizer.step()
 
         # Update Actor and Entropy
-        sampled_actions, log_probs_dict, _ = self.policy.actor.get_action_and_stats(current_obs, memories=memories, masks=act_masks)
+        sampled_actions, log_probs_dict, _ = self.policy.actor.get_action_and_stats(
+            current_obs, 
+            memories=memories, 
+            masks=act_masks,
+            sequence_length=self.policy.sequence_length
+        )
         log_probs = log_probs_dict['log_probs'].continuous_tensor
         
-        q1_policy, q2_policy = self.q_network(current_obs, sampled_actions.continuous_tensor, memories=memories)
+        q1_policy, q2_policy = self.q_network(
+            current_obs, 
+            sampled_actions.continuous_tensor, 
+            memories=memories,
+            sequence_length=self.policy.sequence_length
+        )
         # Take mean over quantiles to get a single Q value
         q1_policy_mean = q1_policy[self.stream_names[0]].mean(dim=1).squeeze()
         q2_policy_mean = q2_policy[self.stream_names[0]].mean(dim=1).squeeze()
