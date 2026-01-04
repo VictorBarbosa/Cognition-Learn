@@ -131,6 +131,8 @@ class TorchTDSACOptimizer(TorchSACOptimizer):
             rewards[name] = ModelUtils.list_to_tensor(
                 batch[RewardSignalUtil.rewards_key(name)]
             )
+            if rewards[name].dim() == 1:
+                rewards[name] = rewards[name].unsqueeze(1)
 
         n_obs = len(self.policy.behavior_spec.observation_specs)
         current_obs = ObsUtil.from_buffer(batch, n_obs)
@@ -152,7 +154,9 @@ class TorchTDSACOptimizer(TorchSACOptimizer):
         else:
             memories = None
 
-        q_memories = None # TDSAC recurrent support limited in this impl
+        q_memories = (
+            torch.zeros_like(memories) if memories is not None else None
+        )
 
         # Copy normalizers
         self.q_network.q1_network.network_body.copy_normalization(
@@ -219,15 +223,33 @@ class TorchTDSACOptimizer(TorchSACOptimizer):
             _cont_ent_coef = self._log_ent_coef.continuous.exp()
             
             for name in target_q1_out.keys():
-                min_q = torch.min(target_q1_out[name], target_q2_out[name])
+                t_q1 = target_q1_out[name]
+                t_q2 = target_q2_out[name]
+
+                # Condense if discrete
+                if self._action_spec.discrete_size > 0:
+                    # Manually gather Q-values for the selected discrete actions
+                    d_actions = next_action.discrete_tensor.long()
+                    
+                    # Fix dimensions: [128, 1, 1] -> [128, 1]
+                    if d_actions.dim() > 2:
+                        d_actions = d_actions.reshape(d_actions.shape[0], -1)
+                    
+                    t_q1 = t_q1.gather(1, d_actions)
+                    t_q2 = t_q2.gather(1, d_actions)
+
+                min_q = torch.min(t_q1, t_q2)
+
                 # Subtract entropy
                 if self._action_spec.continuous_size > 0:
                     ent_bonus = torch.sum(_cont_ent_coef * next_log_probs.continuous_tensor, dim=1, keepdim=True)
-                    min_q = min_q - ent_bonus.squeeze()
+                    min_q = min_q - ent_bonus
                 min_target_q[name] = min_q
 
         masks = ModelUtils.list_to_tensor(batch[BufferKey.MASKS], dtype=torch.bool)
         dones = ModelUtils.list_to_tensor(batch[BufferKey.DONE])
+        if dones.dim() == 1:
+            dones = dones.unsqueeze(1)
 
         # Use sac_q_loss but pass min_target_q as target_values
         q1_loss, q2_loss = self.sac_q_loss(
