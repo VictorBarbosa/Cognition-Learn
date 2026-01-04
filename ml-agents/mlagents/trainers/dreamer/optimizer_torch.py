@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Union
+from typing import Dict, List, Tuple, Optional, Any, Union, cast
 import attr
 
 from mlagents.torch_utils import torch, nn, default_device
@@ -13,6 +13,7 @@ from mlagents.trainers.dreamer.settings import DreamerSettings
 from mlagents.trainers.torch_entities.utils import ModelUtils
 from mlagents.trainers.torch_entities.networks import NetworkBody
 from mlagents.trainers.torch_entities.layers import linear_layer, Initialization
+from mlagents.trainers.trajectory import ObsUtil
 
 logger = get_logger(__name__)
 
@@ -106,12 +107,12 @@ class RSSM(nn.Module):
         return stoch.flatten(1)
 
 class WorldModel(nn.Module):
-    def __init__(self, obs_specs, action_spec, settings: DreamerSettings):
+    def __init__(self, obs_specs, action_spec, settings: DreamerSettings, network_settings):
         super().__init__()
         self.settings = settings
         
         # Encoders (using ML-Agents standard encoders)
-        self.encoder = NetworkBody(obs_specs, settings.network_settings)
+        self.encoder = NetworkBody(obs_specs, network_settings)
         embed_dim = self.encoder.h_size
         
         # Action Dim
@@ -183,7 +184,8 @@ class TorchDreamerOptimizer(TorchOptimizer):
         self.world_model = WorldModel(
             policy.behavior_spec.observation_specs,
             policy.behavior_spec.action_spec,
-            self.settings
+            self.settings,
+            trainer_settings.network_settings
         ).to(default_device())
         
         feat_dim = self.settings.hidden_units + (32 * 32)

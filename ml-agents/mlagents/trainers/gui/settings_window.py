@@ -988,6 +988,21 @@ class SettingsWindow(QMainWindow):
                 for f in fields_to_remove:
                     hparams.pop(f, None)
             
+            # Auto-correct batch_size if smaller than sequence_length when memory is used
+            hparams = config.get("hyperparameters", {})
+            net_settings = config.get("network_settings", {})
+            memory_settings = net_settings.get("memory", {})
+            
+            # Ensure batch_size is int
+            batch_size = int(hparams.get("batch_size", 1024))
+            
+            if memory_settings:
+                seq_len = int(memory_settings.get("sequence_length", 64))
+                if batch_size < seq_len:
+                    self.console_output.append(f"[WARNING] Batch size ({batch_size}) is smaller than sequence length ({seq_len}) for {page.algo_name}. Auto-adjusting batch_size to {seq_len}.")
+                    batch_size = seq_len
+                    hparams["batch_size"] = batch_size
+
             # Use provided behavior name or algorithm name
             b_name = behavior_name if behavior_name else page.algo_name
             

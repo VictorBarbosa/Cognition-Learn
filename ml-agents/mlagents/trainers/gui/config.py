@@ -304,7 +304,7 @@ ALGO_DEFAULTS = {
         }
     },
     "dreamer": {
-        "batch_size": 16, # Dreamer uses small batch sizes but processes sequences
+        "batch_size": 1024, # Increased to satisfy batch_size >= sequence_length (16 seqs * 64 len)
         "buffer_size": 100000,
         "learning_rate": 1e-4,
         "learning_rate_schedule": "constant",

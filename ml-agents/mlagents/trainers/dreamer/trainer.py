@@ -4,6 +4,7 @@ from mlagents.trainers.trainer.off_policy_trainer import OffPolicyTrainer
 from mlagents.trainers.policy.torch_policy import TorchPolicy
 from mlagents.trainers.dreamer.optimizer_torch import TorchDreamerOptimizer, DreamerSettings
 from mlagents.trainers.behavior_id_utils import BehaviorIdentifiers
+from mlagents.trainers.trajectory import Trajectory
 from mlagents_envs.base_env import BehaviorSpec
 from mlagents.trainers.torch_entities.networks import SimpleActor
 
@@ -26,8 +27,6 @@ class DreamerTrainer(OffPolicyTrainer):
         self.hyperparameters: DreamerSettings = cast(
             DreamerSettings, trainer_settings.hyperparameters
         )
-        # Enforce sequence length for the buffer
-        self.policy.sequence_length = self.hyperparameters.batch_length
 
     def create_optimizer(self) -> TorchDreamerOptimizer:
         return TorchDreamerOptimizer(
@@ -37,6 +36,10 @@ class DreamerTrainer(OffPolicyTrainer):
     def create_policy(
         self, parsed_behavior_id: BehaviorIdentifiers, behavior_spec: BehaviorSpec
     ) -> TorchPolicy:
+        # Enforce sequence length for the buffer
+        if self.trainer_settings.network_settings.memory is not None:
+            self.trainer_settings.network_settings.memory.sequence_length = self.hyperparameters.batch_length
+
         # We use SimpleActor as a placeholder structure for the Policy object,
         # but the Optimizer replaces the logic with the World Model + ActorCritic.
         # Ideally we'd write a DreamerPolicy, but TorchPolicy is tightly coupled.
@@ -51,6 +54,20 @@ class DreamerTrainer(OffPolicyTrainer):
             actor_cls,
             actor_kwargs,
         )
+
+    def _process_trajectory(self, trajectory: Trajectory) -> None:
+        """
+        Takes a trajectory and processes it, putting it into the replay buffer.
+        """
+        super()._process_trajectory(trajectory)
+        agent_buffer_trajectory = trajectory.to_agentbuffer()
+        
+        # Update the normalization
+        if self.is_training:
+            self.policy.actor.update_normalization(agent_buffer_trajectory)
+            
+        # Add to replay buffer
+        self._append_to_update_buffer(agent_buffer_trajectory)
 
     @staticmethod
     def get_trainer_name() -> str:
