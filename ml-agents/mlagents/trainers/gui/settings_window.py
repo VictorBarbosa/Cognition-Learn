@@ -52,6 +52,19 @@ class AlgorithmSettingsPage(QWidget):
         else:
             self.checkpoint_le = None
 
+        # Load Algo Specific YAML Section
+        self.yaml_group = QGroupBox("Load Settings from YAML")
+        self.yaml_group.setStyleSheet("QGroupBox { border: 1px solid #4CAF50; }") # Green border to distinguish
+        yaml_layout = QHBoxLayout()
+        
+        self.load_yaml_btn = QPushButton("Load Parameters from File")
+        self.load_yaml_btn.setToolTip("Load a YAML file containing hyperparameters for this algorithm. It overrides current values.")
+        self.load_yaml_btn.clicked.connect(self.load_algo_yaml)
+        yaml_layout.addWidget(self.load_yaml_btn)
+        
+        self.yaml_group.setLayout(yaml_layout)
+        form.addRow(self.yaml_group)
+
         # Hyperparameters specific to this algorithm
         hp_group = QGroupBox("Algorithm Specific Hyperparameters")
         hp_form = QFormLayout()
@@ -61,6 +74,8 @@ class AlgorithmSettingsPage(QWidget):
         def create_inputs(data, layout, prefix=""):
             for key, value in data.items():
                 full_key = f"{prefix}{key}"
+                # print(f"DEBUG: Creating input for {full_key} (Type: {type(value)})")
+                
                 if key == "memory":
                     # Special handling for Memory (toggleable section)
                     mem_group = QGroupBox("Memory Settings")
@@ -111,6 +126,8 @@ class AlgorithmSettingsPage(QWidget):
                     inp.setRange(0, 1000000000)
                     inp.setValue(value)
                     layout.addRow(f"{key.replace('_', ' ').capitalize()}:", inp)
+                    self.inputs[full_key] = inp
+                    # print(f"DEBUG: Registered INT widget for {full_key}")
                 elif value is None:
                     inp = QLineEdit("null")
                     layout.addRow(f"{key.replace('_', ' ').capitalize()}:", inp)
@@ -132,7 +149,10 @@ class AlgorithmSettingsPage(QWidget):
                     layout.addRow(f"{key.replace('_', ' ').capitalize()}:", inp)
                     self.inputs[full_key] = inp
 
+        print(f"DEBUG: Generating UI for {algo_name} with defaults keys: {list(defaults.keys())}")
         create_inputs(defaults, hp_form)
+        print(f"DEBUG: Total inputs registered: {len(self.inputs)}")
+        # for k in self.inputs: print(f"  - {k}")
 
         hp_group.setLayout(hp_form)
         form.addWidget(hp_group)
@@ -152,6 +172,191 @@ class AlgorithmSettingsPage(QWidget):
         btn_layout.addWidget(next_btn)
 
         layout.addLayout(btn_layout)
+
+    def load_algo_yaml(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Select Algorithm Config YAML", "", "YAML Files (*.yaml *.yml);;All Files (*)"
+        )
+        if not filename:
+            return
+
+        try:
+            with open(filename, 'r') as f:
+                config = yaml.safe_load(f)
+
+            if not config:
+                QMessageBox.warning(self, "Warning", "File is empty.")
+                return
+
+            # Extract the relevant configuration block
+            target_config = self._extract_algo_config(config)
+            
+            if target_config:
+                # Debug info for user
+                keys_found = list(target_config.keys())
+                print(f"DEBUG: Config extracted with keys: {keys_found}")
+                
+                count = self._update_ui_from_config(target_config)
+                
+                if count > 0:
+                    QMessageBox.information(self, "Success", f"Updated {count} parameters from {os.path.basename(filename)}.\n\n(Check console for details if values seem wrong)")
+                else:
+                    QMessageBox.warning(self, "Warning", "File loaded but NO matching parameters were found to update in this screen.\nCheck if the YAML keys match the algorithm settings.")
+            else:
+                QMessageBox.warning(self, "Warning", f"Could not find a valid configuration block in the file.\nExpected structure with 'behaviors' or flat config.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load YAML: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def _extract_algo_config(self, config):
+        """
+        Aggressively tries to find the configuration dictionary.
+        """
+        # Case 1: Standard behaviors dictionary
+        if "behaviors" in config and isinstance(config["behaviors"], dict):
+            # First try to match trainer_type
+            for b_name, b_conf in config["behaviors"].items():
+                if b_conf.get("trainer_type") == self.algo_name:
+                    print(f"DEBUG: Found matching trainer_type '{self.algo_name}' in behavior '{b_name}'")
+                    return b_conf
+            
+            # If no match, just take the FIRST behavior found
+            # (Assume user selected this file intentionally for this screen)
+            first_key = list(config["behaviors"].keys())[0]
+            print(f"DEBUG: No exact trainer_type match. Using first behavior: '{first_key}'")
+            return config["behaviors"][first_key]
+
+        # Case 2: 'default_settings' pattern
+        if "default_settings" in config and isinstance(config["default_settings"], dict):
+             print("DEBUG: Using 'default_settings' block")
+             return config["default_settings"]
+
+        # Case 3: Flat config (check for hyperparameters key)
+        if "hyperparameters" in config:
+            print("DEBUG: Using root dictionary as config")
+            return config
+
+        return None
+
+    def _flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+    def _update_ui_from_config(self, config):
+        """
+        Updates UI widgets with values from config using a flexible matching strategy.
+        Returns number of updated fields.
+        """
+        # Flatten the config so we have keys like "hyperparameters.batch_size": 2048
+        flat_config = self._flatten_dict(config)
+        
+        # Debug: Print all keys available in YAML
+        print("\n--- DEBUG: YAML Available Keys ---")
+        for k, v in flat_config.items():
+            print(f"  '{k}': {v} (Type: {type(v).__name__})")
+        print("----------------------------------\n")
+        
+        # Create a lookup map for the config keys to handle "suffix matching"
+        key_map = {}
+        for flat_key in flat_config.keys():
+            parts = flat_key.split('.')
+            leaf = parts[-1]
+            key_map[leaf] = flat_key
+            key_map[flat_key] = flat_key
+
+        updated_count = 0
+        missing_keys = []
+        
+        # Debug: Check UI keys
+        print("--- DEBUG: Matching UI Keys ---")
+
+        for ui_key, widget in self.inputs.items():
+            # ui_key example: "batch_size" (GUI) or "network_settings.hidden_units"
+            
+            target_key = None
+            
+            # 1. Exact match
+            if ui_key in flat_config:
+                target_key = ui_key
+            
+            # 2. Suffix match using the map
+            if not target_key:
+                leaf_ui = ui_key.split('.')[-1]
+                if leaf_ui in key_map:
+                    target_key = key_map[leaf_ui]
+
+            if not target_key:
+                missing_keys.append(ui_key)
+                # print(f"  [MISSING] GUI Key '{ui_key}' not found in YAML.")
+                continue
+
+            value = flat_config[target_key]
+            
+            try:
+                # --- UPDATE WIDGETS ---
+                if isinstance(widget, QGroupBox) and "memory" in ui_key:
+                    if value is None:
+                         widget.setChecked(False)
+                    else:
+                         widget.setChecked(True)
+                
+                elif isinstance(widget, QCheckBox):
+                    widget.setChecked(bool(value))
+                
+                elif isinstance(widget, QSpinBox):
+                    # QSpinBox requires int. Handle strings/floats safely.
+                    try:
+                        val_int = int(float(value))
+                        widget.setValue(val_int)
+                    except ValueError:
+                        print(f"  [WARN] Could not convert '{value}' to int for {ui_key}")
+
+                elif isinstance(widget, QDoubleSpinBox):
+                    # QDoubleSpinBox requires float.
+                    try:
+                        val_float = float(value)
+                        widget.setValue(val_float)
+                    except ValueError:
+                        print(f"  [WARN] Could not convert '{value}' to float for {ui_key}")
+                    
+                elif isinstance(widget, QComboBox):
+                    str_val = str(value)
+                    index = widget.findText(str_val)
+                    if index >= 0:
+                        widget.setCurrentIndex(index)
+                    else:
+                        widget.setCurrentText(str_val)
+                        
+                elif isinstance(widget, QLineEdit):
+                    if value is None:
+                        widget.setText("null")
+                    else:
+                        widget.setText(str(value))
+                
+                updated_count += 1
+                print(f"  [OK] GUI '{ui_key}' <- YAML '{target_key}': {value}")
+                
+            except Exception as e:
+                print(f"  [ERROR] Updating '{ui_key}' with value '{value}': {e}")
+        
+        if missing_keys:
+            print(f"\n--- DEBUG: {len(missing_keys)} GUI keys NOT found in YAML ---")
+            # Print first few missing as example
+            for k in missing_keys[:5]:
+                print(f"  - {k}")
+            if len(missing_keys) > 5: print("  ... and others.")
+
+        # Force a repaint to ensure visual update
+        self.repaint()
+        return updated_count
 
     def browse_checkpoint(self):
         filename, _ = QFileDialog.getOpenFileName(
@@ -1217,6 +1422,14 @@ class SettingsWindow(QMainWindow):
             try:
                 with open(config_path, "w") as f:
                     yaml.dump(run_options, f, sort_keys=False)
+                
+                # Verify and Log Generated Config for User Confirmation
+                self.console_output.append(f"\n--- Generated Configuration ({algo_name}) ---")
+                self.console_output.append(f"File: {config_path}")
+                with open(config_path, "r") as f_read:
+                    self.console_output.append(f_read.read())
+                self.console_output.append("------------------------------------------\n")
+
             except Exception as e:
                 self.console_output.append(f"Error saving config for {algo_name}: {str(e)}")
                 continue

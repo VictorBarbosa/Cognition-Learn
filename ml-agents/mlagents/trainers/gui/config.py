@@ -102,6 +102,7 @@ ALGO_DEFAULTS = {
         "beta_schedule": "linear",
         "epsilon_schedule": "linear",
         "entropy_temperature": 1.0,
+        "entropy_temperature_schedule": "constant",
         "adaptive_entropy_temperature": True,
         "target_entropy": None,
         "network_settings": {
@@ -140,6 +141,7 @@ ALGO_DEFAULTS = {
         "curiosity_num_layers": 3,
         "imagination_horizon": 5,
         "use_imagination_augmented": True,
+        "curiosity_loss_weight": 1.0,
         "network_settings": {
             "normalize": True,
             "hidden_units": 256,
