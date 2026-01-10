@@ -38,7 +38,7 @@ class AlgorithmSettingsPage(QWidget):
 
         # Resume / Initialization Section (New)
         if global_resume:
-            self.resume_group = QGroupBox("Resume Configuration")
+            self.resume_group = QGroupBox("Initialization / Load Model")
             self.resume_group.setStyleSheet("QGroupBox { border: 2px solid #FFD600; }")
             res_layout = QHBoxLayout()
             self.checkpoint_le = QLineEdit()
@@ -123,7 +123,7 @@ class AlgorithmSettingsPage(QWidget):
                     self.inputs[full_key] = inp
                 elif isinstance(value, int):
                     inp = QSpinBox()
-                    inp.setRange(0, 1000000000)
+                    inp.setRange(0, 999999999)
                     inp.setValue(value)
                     layout.addRow(f"{key.replace('_', ' ').capitalize()}:", inp)
                     self.inputs[full_key] = inp
@@ -141,6 +141,12 @@ class AlgorithmSettingsPage(QWidget):
                 elif "vis_encode_type" in key.lower():
                     inp = QComboBox()
                     inp.addItems(["simple", "nature_cnn", "resnet", "match3", "fully_connected"])
+                    inp.setCurrentText(str(value))
+                    layout.addRow(f"{key.replace('_', ' ').capitalize()}:", inp)
+                    self.inputs[full_key] = inp
+                elif "goal_conditioning_type" in key.lower():
+                    inp = QComboBox()
+                    inp.addItems(["none", "hyper"])
                     inp.setCurrentText(str(value))
                     layout.addRow(f"{key.replace('_', ' ').capitalize()}:", inp)
                     self.inputs[full_key] = inp
@@ -639,6 +645,112 @@ class SettingsWindow(QMainWindow):
         trainer_group.setLayout(trainer_form)
         form_layout.addWidget(trainer_group)
 
+        # 3.1 Self Play
+        self.self_play_group = QGroupBox("Self Play (Optional)")
+        self.self_play_group.setCheckable(True)
+        self.self_play_group.setChecked(False)
+        
+        # Container for collapse logic
+        sp_container = QWidget()
+        self_play_form = QFormLayout(sp_container)
+        self_play_form.setContentsMargins(0, 5, 0, 0)
+
+        self.sp_save_steps = QSpinBox()
+        self.sp_save_steps.setRange(1, 10000000)
+        self.sp_save_steps.setValue(50000)
+        self_play_form.addRow("Save Steps:", self.sp_save_steps)
+
+        self.sp_team_change = QSpinBox()
+        self.sp_team_change.setRange(1, 10000000)
+        self.sp_team_change.setValue(200000)
+        self_play_form.addRow("Team Change:", self.sp_team_change)
+
+        self.sp_swap_steps = QSpinBox()
+        self.sp_swap_steps.setRange(1, 10000000)
+        self.sp_swap_steps.setValue(2000)
+        self_play_form.addRow("Swap Steps:", self.sp_swap_steps)
+
+        self.sp_window = QSpinBox()
+        self.sp_window.setRange(1, 1000)
+        self.sp_window.setValue(10)
+        self_play_form.addRow("Window:", self.sp_window)
+
+        self.sp_ratio = QDoubleSpinBox()
+        self.sp_ratio.setRange(0.0, 1.0)
+        self.sp_ratio.setDecimals(2)
+        self.sp_ratio.setValue(0.5)
+        self_play_form.addRow("Play Latest Ratio:", self.sp_ratio)
+
+        self.sp_elo = QDoubleSpinBox()
+        self.sp_elo.setRange(0.0, 5000.0)
+        self.sp_elo.setValue(1200.0)
+        self_play_form.addRow("Initial Elo:", self.sp_elo)
+
+        # Layout for the group itself
+        sp_layout = QVBoxLayout()
+        sp_layout.addWidget(sp_container)
+        self.self_play_group.setLayout(sp_layout)
+        
+        # Connect toggle signal
+        self.self_play_group.toggled.connect(sp_container.setVisible)
+        sp_container.setVisible(False) # Default hidden
+        
+        form_layout.addWidget(self.self_play_group)
+
+        # 3.2 Behavioral Cloning
+        self.bc_group = QGroupBox("Behavioral Cloning (Optional)")
+        self.bc_group.setCheckable(True)
+        self.bc_group.setChecked(False)
+        
+        # Container for collapse logic
+        bc_container = QWidget()
+        bc_form = QFormLayout(bc_container)
+        bc_form.setContentsMargins(0, 5, 0, 0)
+
+        bc_path_layout = QHBoxLayout()
+        self.bc_demo_path = QLineEdit("")
+        bc_path_layout.addWidget(self.bc_demo_path)
+        self.bc_browse_btn = QPushButton("Browse")
+        self.bc_browse_btn.clicked.connect(self.browse_bc_demo)
+        bc_path_layout.addWidget(self.bc_browse_btn)
+        bc_form.addRow("Demo Path:", bc_path_layout)
+
+        self.bc_strength = QDoubleSpinBox()
+        self.bc_strength.setRange(0.0, 1.0)
+        self.bc_strength.setValue(1.0)
+        bc_form.addRow("Strength:", self.bc_strength)
+
+        self.bc_steps = QSpinBox()
+        self.bc_steps.setRange(0, 10000000)
+        self.bc_steps.setValue(0)
+        bc_form.addRow("Steps:", self.bc_steps)
+
+        self.bc_batch_size = QSpinBox()
+        self.bc_batch_size.setRange(1, 65536)
+        self.bc_batch_size.setValue(512)
+        bc_form.addRow("Batch Size:", self.bc_batch_size)
+
+        self.bc_num_epoch = QSpinBox()
+        self.bc_num_epoch.setRange(1, 100)
+        self.bc_num_epoch.setValue(3)
+        bc_form.addRow("Num Epoch:", self.bc_num_epoch)
+
+        self.bc_samples = QSpinBox()
+        self.bc_samples.setRange(0, 1000000)
+        self.bc_samples.setValue(0)
+        bc_form.addRow("Samples Per Update:", self.bc_samples)
+
+        # Layout for the group itself
+        bc_layout = QVBoxLayout()
+        bc_layout.addWidget(bc_container)
+        self.bc_group.setLayout(bc_layout)
+        
+        # Connect toggle signal
+        self.bc_group.toggled.connect(bc_container.setVisible)
+        bc_container.setVisible(False) # Default hidden
+
+        form_layout.addWidget(self.bc_group)
+
         # 4. Environment Parameters (Dictionary)
         param_group = QGroupBox("Environment Parameters (Key-Value)")
         param_layout = QVBoxLayout()
@@ -660,7 +772,7 @@ class SettingsWindow(QMainWindow):
         # Row 1: ID and Paths
         cp_grid = QFormLayout()
         
-        self.behavior_name_le = QLineEdit("MoonlanderAgent")
+        self.behavior_name_le = QLineEdit("MyBehavior")
         cp_grid.addRow("Behavior Name:", self.behavior_name_le)
         
         self.run_id_le = QLineEdit("ppo")
@@ -841,6 +953,13 @@ class SettingsWindow(QMainWindow):
         if filename:
             self.config_path_le.setText(filename)
 
+    def browse_bc_demo(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Select Demonstration File", "", "ML-Agents Demo (*.demo);;All Files (*)"
+        )
+        if filename:
+            self.bc_demo_path.setText(filename)
+
     def load_config_from_yaml(self):
         path = self.config_path_le.text().strip()
         if not path or not os.path.exists(path):
@@ -903,6 +1022,28 @@ class SettingsWindow(QMainWindow):
                 if behaviors:
                     b_name = list(behaviors.keys())[0]
                     self.behavior_name_le.setText(b_name)
+                    
+                    # Behavioral Cloning & Self Play in loaded config?
+                    first_b = behaviors[b_name]
+                    if "self_play" in first_b and first_b["self_play"]:
+                        sp = first_b["self_play"]
+                        self.self_play_group.setChecked(True)
+                        if "save_steps" in sp: self.sp_save_steps.setValue(sp["save_steps"])
+                        if "team_change" in sp: self.sp_team_change.setValue(sp["team_change"])
+                        if "swap_steps" in sp: self.sp_swap_steps.setValue(sp["swap_steps"])
+                        if "window" in sp: self.sp_window.setValue(sp["window"])
+                        if "play_against_latest_model_ratio" in sp: self.sp_ratio.setValue(sp["play_against_latest_model_ratio"])
+                        if "initial_elo" in sp: self.sp_elo.setValue(sp["initial_elo"])
+                    
+                    if "behavioral_cloning" in first_b and first_b["behavioral_cloning"]:
+                        bc = first_b["behavioral_cloning"]
+                        self.bc_group.setChecked(True)
+                        if "demo_path" in bc: self.bc_demo_path.setText(bc["demo_path"])
+                        if "strength" in bc: self.bc_strength.setValue(bc["strength"])
+                        if "steps" in bc: self.bc_steps.setValue(bc["steps"])
+                        if "batch_size" in bc: self.bc_batch_size.setValue(bc["batch_size"])
+                        if "num_epoch" in bc: self.bc_num_epoch.setValue(bc["num_epoch"])
+                        if "samples_per_update" in bc: self.bc_samples.setValue(bc["samples_per_update"])
                     
             QMessageBox.information(self, "Success", "Configuration loaded successfully (partial).")
 
@@ -1075,7 +1216,9 @@ class SettingsWindow(QMainWindow):
             return
 
         # Create pages
-        is_global_resume = self.resume_rb.isChecked()
+        # Show initialization/checkpoint options if Resume OR Force is selected
+        show_init_options = self.resume_rb.isChecked() or self.force_rb.isChecked()
+        
         for i, algo in enumerate(selected_algos):
             is_last = (i == len(selected_algos) - 1)
             
@@ -1099,7 +1242,7 @@ class SettingsWindow(QMainWindow):
                 on_back=back_cb, 
                 on_next=next_cb, 
                 is_last=is_last,
-                global_resume=is_global_resume
+                global_resume=show_init_options
             )
             self.stacked_widget.addWidget(page)
         
@@ -1201,6 +1344,29 @@ class SettingsWindow(QMainWindow):
         global_checkpoint_interval = self.checkpoint_interval_sb.value()
         global_keep_checkpoints = self.keep_checkpoints_sb.value()
         
+        # Collect Global Optional Settings
+        global_self_play = None
+        if self.self_play_group.isChecked():
+            global_self_play = {
+                "save_steps": self.sp_save_steps.value(),
+                "team_change": self.sp_team_change.value(),
+                "swap_steps": self.sp_swap_steps.value(),
+                "window": self.sp_window.value(),
+                "play_against_latest_model_ratio": self.sp_ratio.value(),
+                "initial_elo": self.sp_elo.value()
+            }
+        
+        global_bc = None
+        if self.bc_group.isChecked():
+            global_bc = {
+                "demo_path": self.bc_demo_path.text().strip(),
+                "strength": self.bc_strength.value(),
+                "steps": self.bc_steps.value(),
+                "batch_size": self.bc_batch_size.value(),
+                "num_epoch": self.bc_num_epoch.value(),
+                "samples_per_update": self.bc_samples.value()
+            }
+
         # Helper to prepare config for an algorithm
         def prepare_config_for_algo(page, behavior_name=None):
             config = page.get_config()
@@ -1209,6 +1375,13 @@ class SettingsWindow(QMainWindow):
             config["summary_freq"] = global_summary_freq
             config["keep_checkpoints"] = global_keep_checkpoints
             config["checkpoint_interval"] = global_checkpoint_interval # Behavior level
+            
+            # Add Optional Global Settings ONLY if enabled
+            if global_self_play is not None:
+                config["self_play"] = global_self_play
+            
+            if global_bc is not None:
+                config["behavioral_cloning"] = global_bc
             
             # Clean up PPO-specifics if not PPO
             ppo_variants = ["ppo", "poca", "ppo_et", "ppo_ce"]
@@ -1349,6 +1522,9 @@ class SettingsWindow(QMainWindow):
                 cmd.extend(["--env", env_path])
             
             self.console_output.append(f"--- Launching Visual Monitor (Dummy) ---")
+            # NOTE: We intentionally DO NOT pass env_args or environment_parameters here.
+            # The monitor should observe the environment in its default state (or as controlled by the model),
+            # unaffected by training-specific overrides or curriculum parameters.
             self.console_output.append(f"Command: {' '.join(cmd)}")
             
             worker = TrainingWorker(cmd, name="visual_monitor")
@@ -1361,9 +1537,18 @@ class SettingsWindow(QMainWindow):
 
         for algo_name, page, worker_count in workers_to_launch_info:
             # Prepare config for this algorithm once
-            behavior_name = self.behavior_name_le.text().strip() or "MoonlanderAgent"
+            behavior_name = self.behavior_name_le.text().strip() or "MyBehavior"
             config, b_name = prepare_config_for_algo(page, behavior_name)
             
+            # --- Inject Specific Checkpoint into YAML (User Request) ---
+            algo_checkpoint = ""
+            if hasattr(page, 'checkpoint_le') and page.checkpoint_le:
+                algo_checkpoint = page.checkpoint_le.text().strip()
+            
+            if algo_checkpoint:
+                config["init_path"] = algo_checkpoint
+                self.console_output.append(f"[INFO] Setting init_path in YAML for {algo_name}: {algo_checkpoint}")
+
             # Create a shared run_options template for this algo
             run_options = {
                 "behaviors": {b_name: config},
@@ -1476,35 +1661,38 @@ class SettingsWindow(QMainWindow):
             cmd.extend(["--torch-device", self.device_combo.currentText()])
             cmd.extend(["--results-dir", self.results_dir_le.text()])
             
-            # --- Per-Algorithm Resume Logic ---
-            algo_checkpoint = ""
-            if hasattr(page, 'checkpoint_le') and page.checkpoint_le:
-                algo_checkpoint = page.checkpoint_le.text().strip()
+            # --- Initialization & State Logic ---
+            # NOTE: Specific file paths are now passed via YAML "init_path" above.
+            # CLI --initialize-from is reserved for Global Run IDs (folders) if needed.
             
-            is_resuming_this_algo = False
+            # 1. Global Initialize From (Run ID)
+            # Only use if no specific file was set (YAML takes precedence usually, but let's be clean)
+            if not algo_checkpoint and self.init_from_le.text().strip():
+                cmd.extend(["--initialize-from", self.init_from_le.text().strip()])
+
+            # 2. State Flags
             if self.resume_rb.isChecked():
+                # If we have a specific file (init_path in YAML), we generally act as "Fine Tuning".
+                # If we want to strictly RESUME training state, we add --resume.
+                # If we just want to load weights and start new, we DON'T add --resume.
+                # However, the "Resume" radio button implies intent to resume.
+                
                 if algo_checkpoint:
-                    # Global resume is ON and we have a specific checkpoint
-                    cmd.append("--resume")
-                    cmd.extend(["--initialize-from", algo_checkpoint])
-                    is_resuming_this_algo = True
+                     # Resume + File = Load weights AND try to resume state (if matching)
+                     cmd.append("--resume")
                 else:
-                    # Global resume is ON but NO checkpoint provided for this algo
-                    # User said: "se esse campo estiver vazio então o resume é ignorado para esse algorimo"
-                    self.console_output.append(f"[INFO] Skipping resume for {algo_name} because no checkpoint was specified.")
-                    # (We don't add --resume)
+                     # Resume + No File = Resume from Results Dir (Standard)
+                     # But user rule: "If field is empty, skip resume" -> applied if we were looking at per-algo field.
+                     # If we are here, we might be doing a global resume.
+                     cmd.append("--resume")
             
-            init_from = self.init_from_le.text().strip()
-            if init_from and not is_resuming_this_algo: # Only use global if not specific
-                cmd.extend(["--initialize-from", init_from])
+            elif self.force_rb.isChecked():
+                cmd.append("--force")
 
             if self.debug_cb.isChecked(): cmd.append("--debug")
-            # Add resume/force/inference only if they weren't handled by the specific logic above
-            if self.resume_rb.isChecked() and is_resuming_this_algo and "--resume" not in cmd:
-                 cmd.append("--resume")
-            
-            if self.force_rb.isChecked(): cmd.append("--force")
+            # Inference flag
             if self.inference_rb.isChecked(): cmd.append("--inference")
+            
             # Log and Start Process
             name_log = base_run_id if self.same_algo_rb.isChecked() else f"{algo_name}_{base_run_id}"
             self.console_output.append(f"--- Launching Algorithm Group: {algo_name} (Envs: {worker_count}) ---")

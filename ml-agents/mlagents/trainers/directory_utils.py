@@ -36,10 +36,14 @@ def validate_existing_directories(
 
     # Verify init path if specified.
     if init_path is not None:
-        if not os.path.isdir(init_path):
+        # Allow init_path to be a specific file (.pt/.onnx) OR a directory (Run ID)
+        is_valid_dir = os.path.isdir(init_path)
+        is_valid_file = os.path.isfile(init_path) and (init_path.endswith('.pt') or init_path.endswith('.onnx'))
+        
+        if not (is_valid_dir or is_valid_file):
             raise UnityTrainerException(
                 "Could not initialize from {}. "
-                "Make sure models have already been saved with that run ID.".format(
+                "Make sure models have already been saved with that run ID or the file path is correct.".format(
                     init_path
                 )
             )
